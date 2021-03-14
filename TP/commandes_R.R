@@ -1,0 +1,115 @@
+
+### modeling interaction with mixed model (nlme package)
+
+
+library(ggplot2)        
+library(gridExtra)
+library(nlme)
+library(lme4)
+
+#-----------------#
+### read data
+#-----------------#
+
+ge <- read.csv2("GE.csv")
+summary(ge)
+
+# 3 sites
+# 20 families
+
+nlevels(ge$family)
+
+#-----------------#
+# dispositif experimental
+#-----------------#
+
+ftable(site ~ family, data = ge)
+
+# une centaine d'observations par famille x site
+# unbalanced data ! certains combinaison famille x site n'ont pas �t� observ�es
+
+#-----------------#
+# exploration graphique
+#-----------------#
+
+ggplot(ge, aes(site, bn)) + geom_boxplot()  # variabilite differente d'une site a l'autre (+ faible sur le site 1)
+ggplot(ge, aes(site, bn)) + geom_boxplot()  + facet_wrap(~family)
+
+# pour les familles en communs: classement des familles par site
+
+sub <- droplevels(ge[ge$family %in% c("GE02","GE03","GE06","GE07","GE09","GE12","GE16"),])
+ggplot(sub, aes(reorder(family, bn), bn)) + geom_boxplot()  + facet_wrap(~site) 
+# classement un peu diff�rent (par exemple, famille G07 bien classee sur le site 3 alors que mediocre sur le site 1 et 2.)
+
+
+#-----------------#
+# modeles stats
+#-----------------#
+
+options(contrasts = c("contr.sum", "contr.poly"))
+contrasts(ge$site)
+
+### anova a deux facteurs => impossible d'estimer l'interaction (car unbalanced)
+
+mod1 <- lm(bn ~ site*family, data = ge)
+summary(mod1) # ok, plein de NA
+
+
+### Model with diagonal variance and independance
+
+mod2 <- lme(bn ~ site, data = ge,
+            random =list(family = pdDiag(~ site - 1)))
+VarCorr(mod2)
+summary(mod2)$AIC
+summary(mod2)
+# la variance genetique sur le site 1 est la plus faible => conforme au boxplot du depart
+
+### Compound Symmetry Model
+
+mod3 <- lmer(bn ~ site + (1|family/site), data = ge)
+summary(mod3)
+# variance g�n�tique intra-site=  6.093 + 3.691 = 9.784
+# covariance g�n�tique entre deux sites: round(6.093/(sqrt(9.784)*sqrt(9.784)),3)
+# ou 
+mod3 <- lmer(bn ~ site + (1|family) + (1|family:site), data = ge)
+summary(mod3)
+# ou
+mod3 <- lme(bn ~ site, data = ge,
+            random =list(family = pdCompSymm(~ site -1)))
+VarCorr(mod3)
+summary(mod3)$AIC
+summary(mod3)
+
+### HCS model
+mod4 <- lme(bn ~ site, data = ge,
+            random = list(family = pdBlocked(list(pdIdent(~ 1),
+                                                  pdDiag(~ site - 1)))))
+VarCorr(mod4)
+summary(mod4)$AIC
+
+
+### Unstructured (full) mode
+mod5 <- lme(bn ~ site, data = ge,
+            random = ~site - 1|family)
+VarCorr(mod5)
+summary(mod5)$AIC
+
+#-----------------#
+# prediction
+#-----------------#
+
+ranef(mod5)
+re <- ranef(mod5)  # get random effect 
+colnames(re) <- c("re_site1","re_site2","re_site3")
+
+ggplot(re, aes(re_site1, re_site2)) + geom_point(aes(colour = rownames(re)), size = 5) + 
+  geom_smooth(method = "lm") + theme(legend.position = "bottom") + 
+  xlab("Random Effect Site 1") +  ylab("Random Effect Site 2") + labs(colour = "Family")
+
+ggplot(re, aes(re_site1, re_site3)) + geom_point(aes(colour = rownames(re)), size = 5) + 
+  geom_smooth(method = "lm") + theme(legend.position = "bottom") + 
+  xlab("Random Effect Site 1") +  ylab("Random Effect Site 3") + labs(colour = "Family")
+
+ggplot(re, aes(re_site2, re_site3)) + geom_point(aes(colour = rownames(re)), size = 5) + 
+  geom_smooth(method = "lm") + theme(legend.position = "bottom") + 
+  xlab("Random Effect Site 2") +  ylab("Random Effect Site 3") + labs(colour = "Family")
